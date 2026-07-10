@@ -1,6 +1,6 @@
 import { ref, reactive, computed, watch } from 'vue';
 import { db } from '../assets/firebase.js'; // นำเข้า Firebase
-import { doc, getDoc, setDoc } from 'firebase/firestore'; // นำเข้าคำสั่ง Firestore
+import { doc, setDoc, onSnapshot } from 'firebase/firestore'; // เปลี่ยนมาใช้ onSnapshot สำหรับ Real-time
 
 // --- Constants & Defaults ---
 export const MONTH_NAMES_EN = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -28,46 +28,6 @@ export const DEFAULT_RULES = [
   { id: 'team_deathmatch_match_mvp', name: 'TDM MATCH MVP', points: 2, note: 'คะแนน MVP แมตช์ในโหมด Team Deathmatch' },
   { id: 'deathmatch_1st_match_mvp', name: 'DM 1ST MATCH MVP', points: 2, note: 'คะแนนอันดับ 1 ในโหมด Deathmatch' },
   { id: 'deathmatch_2nd_3rd', name: 'DM 2ND-3RD', points: 1, note: 'คะแนนอันดับ 2-3 ในโหมด Deathmatch' }
-];
-
-// July 2026 demo logs for Oon (p1) to match screenshots exactly
-export const getDemoLogs = (year) => [
-  {
-    id: 'demo_log_1',
-    playerId: 'p1',
-    day: 10,
-    month: 6, // July (0-indexed)
-    year: year,
-    activities: { rank_mvp: 3, rank_win: 10 },
-    note: 'ลงเล่นแรงก์ชนะรัวๆ'
-  },
-  {
-    id: 'demo_log_2',
-    playerId: 'p1',
-    day: 11,
-    month: 6, // July
-    year: year,
-    activities: { unrate_match_mvp: 20, rank_mvp: 4, rank_lose: 30, rank_win: 4 },
-    note: 'เล่น Unrated และ Rank'
-  },
-  {
-    id: 'demo_log_3',
-    playerId: 'p1',
-    day: 12,
-    month: 6, // July
-    year: year,
-    activities: { rank_draw: 20, rank_win: 20, team_deathmatch_team_mvp: 40 },
-    note: 'แต้มบวกเยอะมากวันนี้'
-  },
-  {
-    id: 'demo_log_4',
-    playerId: 'p1',
-    day: 12,
-    month: 7, // August
-    year: year,
-    activities: {},
-    note: 'ตัวอย่างแถวว่างสิงหาคม'
-  }
 ];
 
 // --- Reactive State ---
@@ -153,13 +113,15 @@ export const updateCountdown = () => {
   countdownText.value = `${days} วัน ${hours} ชม. ${mins} นาที ${secs} วิ.`;
 };
 
-// --- Storage Persistence (เชื่อมต่อกับ Firebase) ---
+// --- Storage Persistence (เชื่อมต่อกับ Firebase แบบ Real-time) ---
 const DOC_REF = doc(db, 'valorant-scoreboard', 'team-data');
+let isReceivingData = false; // ตัวแปรป้องกันการเซฟข้อมูลวนลูปเวลาดึงมาจากคลาวด์
 
-export const loadState = async () => {
-  try {
-    const docSnap = await getDoc(DOC_REF);
+export const loadState = () => {
+  onSnapshot(DOC_REF, (docSnap) => {
     if (docSnap.exists()) {
+      isReceivingData = true; // ล็อกระบบบอกว่า "กำลังรับข้อมูล ห้ามเซฟสวน!"
+
       const data = docSnap.data();
       state.players = data.players || [];
       state.logs = data.logs || [];
@@ -175,22 +137,32 @@ export const loadState = async () => {
         return rule;
       });
 
+      // จัดการ selectedPlayerId ให้ถูกต้องเมื่อโหลดข้อมูลใหม่มาทับ
       if (state.players.length > 0) {
-        selectedPlayerId.value = state.players[0].id;
+        const playerExists = state.players.find(p => p.id === selectedPlayerId.value);
+        if (!playerExists) {
+          selectedPlayerId.value = state.players[0].id;
+        }
       }
+
+      // ปลดล็อกระบบหลังจากหน้าเว็บอัปเดตเสร็จแล้ว 0.5 วิ
+      setTimeout(() => {
+        isReceivingData = false;
+      }, 500);
+
     } else {
       // ถ้าเปิดใช้ครั้งแรก ให้สร้างข้อมูลเริ่มต้นขึ้นไปบน Firebase
-      await resetToDefaults();
+      resetToDefaults();
     }
-  } catch (e) {
-    console.error('Error loading Firebase state, resetting to defaults.', e);
+  }, (error) => {
+    console.error('เกิดข้อผิดพลาดในการดักฟังข้อมูล Real-time:', error);
     // ฟอลแบ็ค (Fallback) ใช้ค่าเริ่มต้นกรณีเน็ตหลุดตอนเปิดหน้าเว็บครั้งแรก
     const curY = new Date().getFullYear();
     state.players = JSON.parse(JSON.stringify(DEFAULT_PLAYERS));
     state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
-    state.logs = getDemoLogs(curY);
+    state.logs = [];
     state.threshold = 200;
-  }
+  });
 };
 
 export const saveState = async () => {
@@ -212,7 +184,7 @@ export const resetToDefaults = async () => {
   const curY = new Date().getFullYear();
   state.players = JSON.parse(JSON.stringify(DEFAULT_PLAYERS));
   state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
-  state.logs = getDemoLogs(curY);
+  state.logs = [];
   state.threshold = 200;
 
   selectedPlayerId.value = 'p1';
@@ -241,6 +213,9 @@ export const clearAllDatabaseLogs = async () => {
 // ระบบบันทึกอัตโนมัติ (หน่วงเวลา 1.5 วิ เมื่อหยุดพิมพ์หรือแก้ไข จะส่งข้อมูลไปที่ Firebase)
 let saveTimeout = null;
 watch(state, () => {
+  // *** ถ้าข้อมูลนี้ถูกดึงมาจาก Firebase ให้ข้ามไปเลย ไม่ต้องสั่ง Save ซ้ำ ***
+  if (isReceivingData) return;
+
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
     saveState();
@@ -606,7 +581,7 @@ export const confirmClearAllData = () => {
         clearAllDatabaseLogs();
         Swal.fire({
           title: 'ล้างข้อมูลสำเร็จ!',
-          text: 'ล้างข้อมูลทั้งหมดในระบบและเริ่มต้นฐานข้อมูลใหม่แล้ว (ประวัติคะแนนเป็นค่าว่าง)',
+          text: 'ล้างข้อมูลทั้งหมดในระบบและเริ่มต้นฐานข้อมูลใหม่แล้ว',
           icon: 'success',
           confirmButtonColor: '#ff4655',
           background: '#121721',
