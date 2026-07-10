@@ -134,22 +134,22 @@ export const activeCycle = computed(() => {
 export const updateCountdown = () => {
   const now = currentDateTime.value;
   const auto = getAutoCycle(now);
-  
+
   const nextResetYear = auto.month === 11 ? auto.year + 1 : auto.year;
   const nextResetMonth = auto.month === 11 ? 0 : auto.month + 1;
   const nextResetDate = new Date(nextResetYear, nextResetMonth, 5, 0, 0, 0, 0);
-  
+
   const diffMs = nextResetDate.getTime() - now.getTime();
   if (diffMs <= 0) {
     countdownText.value = 'กำลังเปลี่ยนรอบคะแนน...';
     return;
   }
-  
+
   const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
   const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
   const secs = Math.floor((diffMs % (1000 * 60)) / 1000);
-  
+
   countdownText.value = `${days} วัน ${hours} ชม. ${mins} นาที ${secs} วิ.`;
 };
 
@@ -195,12 +195,12 @@ export const resetToDefaults = () => {
   state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
   state.logs = getDemoLogs(curY);
   state.threshold = 200;
-  
+
   selectedPlayerId.value = 'p1';
   isManualOverride.value = false;
   manualMonth.value = new Date().getMonth();
   manualYear.value = curY;
-  
+
   saveState();
 };
 
@@ -237,7 +237,7 @@ export const getLogPoints = (log) => {
   let score = 0;
   const pointsMap = getRulePointsMap.value;
   if (!log || !log.activities) return 0;
-  
+
   Object.keys(log.activities).forEach(ruleId => {
     const count = log.activities[ruleId] || 0;
     const pts = pointsMap[ruleId] || 0;
@@ -295,12 +295,12 @@ export const openAddLogModal = () => {
   logForm.month = activeCycle.value.month;
   logForm.year = activeCycle.value.year;
   logForm.note = '';
-  
+
   logForm.activities = {};
   state.rules.forEach(r => {
     logForm.activities[r.id] = 0;
   });
-  
+
   isLogModalOpen.value = true;
 };
 
@@ -311,12 +311,12 @@ export const openEditLogModal = (log) => {
   logForm.month = log.month;
   logForm.year = log.year;
   logForm.note = log.note || '';
-  
+
   logForm.activities = {};
   state.rules.forEach(r => {
     logForm.activities[r.id] = log.activities[r.id] || 0;
   });
-  
+
   isLogModalOpen.value = true;
 };
 
@@ -332,13 +332,13 @@ export const saveLog = () => {
     });
     return;
   }
-  
+
   const activities = {};
   state.rules.forEach(r => {
     const val = parseInt(logForm.activities[r.id]);
     activities[r.id] = isNaN(val) || val < 0 ? 0 : val;
   });
-  
+
   if (editingLogId.value) {
     const index = state.logs.findIndex(l => l.id === editingLogId.value);
     if (index !== -1) {
@@ -360,7 +360,7 @@ export const saveLog = () => {
       note: logForm.note
     });
   }
-  
+
   isLogModalOpen.value = false;
 };
 
@@ -437,7 +437,7 @@ export const startAddPlayer = () => {
 export const saveNewPlayer = () => {
   const name = newPlayerName.value.trim();
   if (!name) return;
-  
+
   const id = 'p_' + Date.now();
   state.players.push({ id, name });
   selectedPlayerId.value = id;
@@ -452,7 +452,7 @@ export const startEditPlayer = (player) => {
 export const savePlayerName = (playerId) => {
   const name = editingPlayerName.value.trim();
   if (!name) return;
-  
+
   const index = state.players.findIndex(p => p.id === playerId);
   if (index !== -1) {
     state.players[index].name = name;
@@ -565,7 +565,7 @@ export const confirmClearAllData = () => {
     title: 'กรุณากรอกรหัสผ่านเพื่อล้างข้อมูล',
     input: 'password',
     inputLabel: 'รหัสผ่านผู้ดูแลระบบ',
-    inputPlaceholder: 'กรอกรหัสผ่านเพื่อยืนยัน (รหัส: admin123)',
+    inputPlaceholder: 'กรอกรหัสผ่านเพื่อยืนยัน',
     inputAttributes: {
       autocapitalize: 'off',
       autocorrect: 'off'
@@ -579,7 +579,7 @@ export const confirmClearAllData = () => {
     color: '#ece8e1'
   }).then((result) => {
     if (result.isConfirmed) {
-      if (result.value === 'admin123') {
+      if (result.value === 'Loiy') {
         clearAllDatabaseLogs();
         Swal.fire({
           title: 'ล้างข้อมูลสำเร็จ!',
