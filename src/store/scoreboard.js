@@ -1,4 +1,6 @@
 import { ref, reactive, computed, watch } from 'vue';
+import { db } from '../assets/firebase.js'; // นำเข้า Firebase
+import { doc, getDoc, setDoc } from 'firebase/firestore'; // นำเข้าคำสั่ง Firestore
 
 // --- Constants & Defaults ---
 export const MONTH_NAMES_EN = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
@@ -70,7 +72,7 @@ export const getDemoLogs = (year) => [
 
 // --- Reactive State ---
 export const storageKey = 'valorant-scoreboard-state';
-export const activeTab = ref('summary'); // 'summary', 'logs', 'rules', 'settings'
+export const activeTab = ref('summary');
 export const selectedPlayerId = ref('p1');
 
 // Calendar & Auto-cycle states
@@ -80,7 +82,7 @@ export const manualMonth = ref(new Date().getMonth());
 export const manualYear = ref(new Date().getFullYear());
 export const countdownText = ref('');
 
-// App Core State (persisted in localStorage)
+// App Core State 
 export const state = reactive({
   players: [],
   rules: [],
@@ -90,7 +92,7 @@ export const state = reactive({
 
 // Modal Dialog States
 export const isLogModalOpen = ref(false);
-export const editingLogId = ref(null); // null when adding
+export const editingLogId = ref(null);
 export const logForm = reactive({
   playerId: 'p1',
   day: 1,
@@ -103,7 +105,7 @@ export const logForm = reactive({
 // Player management states
 export const isAddingPlayer = ref(false);
 export const newPlayerName = ref('');
-export const isEditingPlayer = ref(null); // playerId
+export const isEditingPlayer = ref(null);
 export const editingPlayerName = ref('');
 
 // --- Cycle Logic (Reset on 5th of every month) ---
@@ -121,7 +123,6 @@ export const getAutoCycle = (date) => {
   return { month: m, year: y };
 };
 
-// Computed active month/year (based on override or auto-calculation)
 export const activeCycle = computed(() => {
   if (isManualOverride.value) {
     return { month: manualMonth.value, year: manualYear.value };
@@ -130,7 +131,6 @@ export const activeCycle = computed(() => {
   }
 });
 
-// Countdown calculations
 export const updateCountdown = () => {
   const now = currentDateTime.value;
   const auto = getAutoCycle(now);
@@ -153,12 +153,14 @@ export const updateCountdown = () => {
   countdownText.value = `${days} วัน ${hours} ชม. ${mins} นาที ${secs} วิ.`;
 };
 
-// --- Storage Persistence ---
-export const loadState = () => {
-  const saved = localStorage.getItem(storageKey);
-  if (saved) {
-    try {
-      const data = JSON.parse(saved);
+// --- Storage Persistence (เชื่อมต่อกับ Firebase) ---
+const DOC_REF = doc(db, 'valorant-scoreboard', 'team-data');
+
+export const loadState = async () => {
+  try {
+    const docSnap = await getDoc(DOC_REF);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
       state.players = data.players || [];
       state.logs = data.logs || [];
       state.threshold = data.threshold !== undefined ? data.threshold : 200;
@@ -173,23 +175,40 @@ export const loadState = () => {
         return rule;
       });
 
-      // Auto-set selected player if loaded ones exist
       if (state.players.length > 0) {
         selectedPlayerId.value = state.players[0].id;
       }
-      return;
-    } catch (e) {
-      console.error('Error loading localStorage state, resetting to defaults.', e);
+    } else {
+      // ถ้าเปิดใช้ครั้งแรก ให้สร้างข้อมูลเริ่มต้นขึ้นไปบน Firebase
+      await resetToDefaults();
     }
+  } catch (e) {
+    console.error('Error loading Firebase state, resetting to defaults.', e);
+    // ฟอลแบ็ค (Fallback) ใช้ค่าเริ่มต้นกรณีเน็ตหลุดตอนเปิดหน้าเว็บครั้งแรก
+    const curY = new Date().getFullYear();
+    state.players = JSON.parse(JSON.stringify(DEFAULT_PLAYERS));
+    state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+    state.logs = getDemoLogs(curY);
+    state.threshold = 200;
   }
-  resetToDefaults();
 };
 
-export const saveState = () => {
-  localStorage.setItem(storageKey, JSON.stringify(state));
+export const saveState = async () => {
+  try {
+    // ต้องแปลงข้อมูลกลับด้วย JSON.parse/stringify เพื่อถอด Proxy ของ Vue ออกก่อนส่งขึ้น Firestore
+    await setDoc(DOC_REF, {
+      players: JSON.parse(JSON.stringify(state.players)),
+      rules: JSON.parse(JSON.stringify(state.rules)),
+      logs: JSON.parse(JSON.stringify(state.logs)),
+      threshold: state.threshold
+    });
+    console.log("Firebase sync successful");
+  } catch (e) {
+    console.error("Error saving to Firebase:", e);
+  }
 };
 
-export const resetToDefaults = () => {
+export const resetToDefaults = async () => {
   const curY = new Date().getFullYear();
   state.players = JSON.parse(JSON.stringify(DEFAULT_PLAYERS));
   state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
@@ -201,14 +220,14 @@ export const resetToDefaults = () => {
   manualMonth.value = new Date().getMonth();
   manualYear.value = curY;
 
-  saveState();
+  await saveState(); // บังคับเซฟขึ้นคลาวด์
 };
 
-export const clearAllDatabaseLogs = () => {
+export const clearAllDatabaseLogs = async () => {
   const curY = new Date().getFullYear();
   state.players = JSON.parse(JSON.stringify(DEFAULT_PLAYERS));
   state.rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
-  state.logs = []; // EMPTY ARRAY! No demo logs!
+  state.logs = []; // ล้าง logs ให้ว่าง
   state.threshold = 200;
 
   selectedPlayerId.value = 'p1';
@@ -216,12 +235,16 @@ export const clearAllDatabaseLogs = () => {
   manualMonth.value = new Date().getMonth();
   manualYear.value = curY;
 
-  saveState();
+  await saveState(); // บังคับเซฟขึ้นคลาวด์
 };
 
-// Watch changes to save automatically
+// ระบบบันทึกอัตโนมัติ (หน่วงเวลา 1.5 วิ เมื่อหยุดพิมพ์หรือแก้ไข จะส่งข้อมูลไปที่ Firebase)
+let saveTimeout = null;
 watch(state, () => {
-  saveState();
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveState();
+  }, 1500);
 }, { deep: true });
 
 // --- Score Calculation Utilities ---
